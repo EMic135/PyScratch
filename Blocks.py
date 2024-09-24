@@ -4,13 +4,6 @@ class Main(Container):
     def __init__(self):
         self.blocks = [Block()]
         self.end = Block()
-    def write(self):
-        code=""
-        indent_level=0
-        for block in self.blocks:
-            code, indent_level = block.write(code, indent_level)
-        code, indent_level = self.end.write(code, indent_level)
-        return code, indent_level
 
 
 class Function(Container):
@@ -53,6 +46,8 @@ if __name__=="__main__":
     main.add_block(test)
     print("---------------------------------")
     print(main.write()[0])
+    print("---------------------------------")
+    print(main.report_structure()[0])
     print("---------------------------------")
     exec(main.write()[0])
     print("---------------------------------")
