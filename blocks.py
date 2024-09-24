@@ -56,6 +56,11 @@ class While(Container):
     def __init__(self, condition):
         super().__init__(start="while "+condition+":")
 
+class For(Container):
+    def __init__(self, var, num_runs):
+        super().__init__(start="for "+var+" in range("+num_runs+"):")
+
+
 class Print(Block):
     def __init__(self, text):
         super().__init__(content="print("+text+")")
