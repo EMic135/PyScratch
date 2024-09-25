@@ -33,7 +33,7 @@ class Block:
         self.widgets = []
         for i in range(len(self.command)):
             if is_var(self.command[i]) and not bool(set(self.command[i]) & set(" ():")):
-                self.widgets.append(tk.Entry(master=self.frame or self.frame))
+                self.widgets.append(tk.Entry(master=self.frame))
                 self.widgets[-1].insert("0", self.command[i])
                 self.command[i] = self.widgets[-1].get
             else:
@@ -43,6 +43,7 @@ class Block:
 
     def pack(self,*args, **kwargs):
         self.frame.pack(*args,**kwargs)
+        print(self.content)
 
     def get_blocks(self,blocks=None):
         blocks = blocks or []
@@ -68,32 +69,35 @@ class Block:
         return report, indent_level
 
 class Container:
-    def __init__(self, start=['if __name__ == "__main__":'], color = '#dfdf00'):
-        self.frame = False
-        if type(start)==type(""):
-            start=[start]
-        self.start=start
-        self.start_content=" ".join(self.start)
-        self.blocks=[]
-        self.add_block(block=Block(content=self.start, indent_change=1, color=color))
-        self.end = Block(indent_change=-1)
-        self.color = color
-
     def create_frame(self, master=None):
-        self.frame = tk.Frame(bg=self.color)
+        self.frame = tk.Frame(bg=self.color, master=master)
 
     def add_block(self, block, prev_block=None):
         if len(self.blocks) > 0:
             if prev_block is None:
                 position = self.blocks.index(self.blocks[-1])+1
+            elif isinstance(prev_block,int):
+                position = prev_block
             else:
                 position = self.blocks.index(prev_block) + 1
         else:
             position = 0
         self.blocks.insert(position, block)
-        if not isinstance(self.frame,tk.Frame):
+        if self.frame is None:
             self.create_frame()
-        block.create_frame(self.frame)
+        block.create_frame(master=self.frame)
+
+    def __init__(self, start=['if __name__ == "__main__":'], color = '#dfdf00'):
+        if type(start) == type(""):
+            start = [start]
+        self.start = start
+        self.start_content = " ".join(self.start)
+        self.blocks = []
+        self.frame = None
+        self.color = color
+        self.add_block(block=Block(content=self.start, indent_change=1, color=color))
+        self.end = Block(indent_change=-1)
+
 
     def remove_block(self, block):
         del self.blocks[self.blocks.index(block)]
@@ -121,6 +125,7 @@ class Container:
     def pack(self, *args, **kwargs):
         for block in self.blocks:
             block.pack(*args, **kwargs)
+            #tk.Label(text="hi",master=self.frame).pack()
         self.frame.pack(*args, **kwargs)
 
 class Print(Block):
@@ -138,8 +143,10 @@ def write_block(name, obj, args, init):
 
 if __name__ == "__main__":
     window = tk.Tk()
-    main=Container()
-    true=Container(start="if True:")
+    window.title('Hi!')
+    main=Container(color='pink')
+    main.create_frame(master=window)
+    true=Container(start="if True:", color='green')
     main.add_block(true)
     true.add_block(Block("print('Hello World!')"))
     true.add_block(Block("message = 'Hi Again!'"))
@@ -152,5 +159,5 @@ if __name__ == "__main__":
     print("---------------------------------")
     exec(main.write()[0])
     print("---------------------------------")
-    main.pack(anchor='w',padx=(20,0))
+    main.pack(side=tk.TOP, anchor='w',padx=(20,0))
     window.mainloop()
