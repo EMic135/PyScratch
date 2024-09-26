@@ -4,6 +4,7 @@ import ast
 from copy import deepcopy
 import io
 from contextlib import redirect_stdout
+from logging import exception
 
 DEBUG = False
 
@@ -183,7 +184,7 @@ if __name__ == "__main__":
     if DEBUG:print(4)
     main.add_block(true)
     if DEBUG:print(5)
-    true.add_block(Block("print('Hello World!')"))
+    true.add_block(Block(["print(","word",")"]))
     if DEBUG:print(6)
     true.add_block(Block("message = 'Hi Again!'"))
     if DEBUG:print(7)
@@ -204,20 +205,27 @@ if __name__ == "__main__":
     tk.Label(master=preview_frame, text="Preview").pack(side=tk.TOP, fill=tk.X, expand=True)
     preview = tk.Text(master=preview_frame)
     preview.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-    preview.delete("1.0",tk.END)
-    preview.insert("1.0",main.write()[0])
     preview_frame.grid(row=1, sticky="news")
 
     tk.Label(master=output_frame, text="Output").pack(side=tk.TOP, fill=tk.BOTH, expand=True)
     output = tk.Text(master=output_frame)
     output.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-    output.delete("1.0", tk.END)
-    stdout = io.StringIO()
-
-    with redirect_stdout(stdout):
-        exec(main.write()[0])
-    out = stdout.getvalue()
-    output.insert("1.0", out)
     output_frame.grid(row=2, sticky="news")
 
+    def handle_keyrelease(event):
+        preview.delete("1.0", tk.END)
+        preview.insert("1.0", main.write()[0])
+
+        output.delete("1.0", tk.END)
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            try:
+                exec(main.write()[0])
+                out = stdout.getvalue()
+            except Exception as e:
+                out = e
+        output.insert("1.0", out)
+
+    window.bind("<KeyRelease>", handle_keyrelease)
+    
     window.mainloop()
