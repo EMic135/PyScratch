@@ -1,3 +1,4 @@
-For(Container):
+from block_lib import *
+class For(Container):
     def __init__(self, var, num_runs):
         super().__init__(start=['for',var,'in range(',num_runs,'):'])

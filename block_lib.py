@@ -2,8 +2,7 @@ import tkinter as tk
 import os
 import ast
 from copy import deepcopy
-import io
-from contextlib import redirect_stdout
+
 from logging import exception
 
 DEBUG = False
@@ -116,8 +115,6 @@ class Container:
         elif isinstance(block,Container):
             new_block=Container(start=block.original_content, color=block.color, master=self.frame)
         block.redo_self(new_block)
-        if DEBUG: print(new_block.original_content, "|", new_block.frame)
-        if DEBUG: print(block.original_content, "|", block.frame)
         self.blocks.insert(position, block)
 
     def remove_block(self, block):
@@ -154,7 +151,7 @@ class Container:
         self.frame.pack(*args, **kwargs)
 
 def create_block(name, obj, args, init):
-    return name + '(' + obj + '):\n    def __init__(self, ' + args + '):\n        ' + init
+    return 'from block_lib import *\nclass '+ name + '(' + obj + '):\n    def __init__(self, ' + args + '):\n        ' + init
 
 def write_block(name, obj, args, init):
     f = open(os.getcwd() + "/Blocks/" + name + ".block", 'w')
@@ -162,6 +159,8 @@ def write_block(name, obj, args, init):
     f.close()
 
 if __name__ == "__main__":
+    import io
+    from contextlib import redirect_stdout
     #DEBUG = True
     class Print(Block):
         def __init__(self, message):
@@ -191,13 +190,21 @@ if __name__ == "__main__":
     print_block=Print("message")
     if DEBUG:print(8)
     main.add_block(print_block)
-    if DEBUG:print(9)
-    if DEBUG:print("---------------------------------")
-    if DEBUG:print(main.write()[0])
-    if DEBUG:print("---------------------------------")
-    if DEBUG:print(main.report_structure()[0])
-    if DEBUG:print("---------------------------------")
-    if DEBUG:exec(main.write()[0])
+    if DEBUG:
+        print(9)
+        print("---------------------------------")
+        print(main.write()[0])
+        print("---------------------------------")
+        print(main.report_structure()[0])
+        print("---------------------------------")
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            try:
+                exec(main.write()[0])
+                out = stdout.getvalue()
+            except Exception as e:
+                out = e
+        print(out)
     if DEBUG:print("---------------------------------")
     main.pack(side=tk.TOP, anchor='w',padx=(25,0), fill='x')
     frame.grid(row=0)
@@ -227,5 +234,5 @@ if __name__ == "__main__":
         output.insert("1.0", out)
 
     window.bind("<KeyRelease>", handle_keyrelease)
-    
+
     window.mainloop()
