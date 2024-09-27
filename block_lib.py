@@ -3,8 +3,6 @@ import os
 import ast
 from copy import deepcopy
 
-from logging import exception
-
 DEBUG = False
 
 def is_var(item):
@@ -115,6 +113,9 @@ class Container:
         elif isinstance(block,Container):
             new_block=Container(start=block.original_content, color=block.color, master=self.frame)
         block.redo_self(new_block)
+        if isinstance(block, Container):
+            self.add_block(block.blocks[0],position)
+            position+=1
         self.blocks.insert(position, block)
 
     def remove_block(self, block):
@@ -170,13 +171,14 @@ if __name__ == "__main__":
     window.title('Hi!')
     window.rowconfigure([0, 1, 2], weight=1, minsize=50)
     window.columnconfigure(0, weight=1, minsize=50)
-    frame=tk.Frame()
+    frame=Container(start=[""], color=None ,master=window)
     preview_frame = tk.Frame()
     output_frame = tk.Frame()
 
     if DEBUG:print(1)
-    main=Container(color='pink',master=frame)
+    main=Container(color='pink')
     if DEBUG:print(2)
+    frame.add_block(main)
     main.add_block(Block("message = 'Bye!'"))
     if DEBUG:print(3)
     true=Container(start="if True:", color='green')
@@ -206,8 +208,8 @@ if __name__ == "__main__":
                 out = e
         print(out)
     if DEBUG:print("---------------------------------")
-    main.pack(side=tk.TOP, anchor='w',padx=(25,0), fill='x')
-    frame.grid(row=0)
+    main.pack(side=tk.TOP, anchor='w',padx=(22,0), fill='x')
+    frame.frame.grid(row=0)
 
     tk.Label(master=preview_frame, text="Preview").pack(side=tk.TOP, fill=tk.X, expand=True)
     preview = tk.Text(master=preview_frame)
