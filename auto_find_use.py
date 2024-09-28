@@ -230,7 +230,7 @@ if __name__ == "__main__":
                     out = stdout.getvalue()
                 except Exception as e:
                     out = str(e) + "\nCheck Code <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<"
-            print(out)
+            print(f'Output:\n{out}')
             print("############################")
         except:
             print(f"Failed to process {word}")
