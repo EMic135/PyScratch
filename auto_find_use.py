@@ -32,10 +32,6 @@ class LimitedTrue:
 
 
 def find_ast_node(keyword_name):
-    """
-    Dynamically find the corresponding AST node class for a given keyword name.
-    Uses heuristics to match the keyword with the node class.
-    """
     for node_name, node_type in ast.__dict__.items():
         if isinstance(node_type, type) and issubclass(node_type, ast.AST):
             if node_name.lower() == keyword_name:
@@ -44,9 +40,6 @@ def find_ast_node(keyword_name):
 
 
 def get_ast_requirements(node_class):
-    """
-    Given an AST node class, extract its required fields and attributes.
-    """
     if node_class:
         return [field for field in node_class._fields]
     return []
@@ -89,17 +82,6 @@ def get_default_args(func):
 
 
 def find_arg(word, all_args, kw_args):
-    """
-    Find arguments for a given function based on known default values and common types.
-    Args:
-        word (str): The function name.
-        all_args (list): List of all argument names.
-        kw_args (dict): Known keyword arguments with their default values.
-
-    Returns:
-        dict: A dictionary of argument names and their values.
-    """
-    # Common types to try for different types of arguments
     common_types = [
         1,  # Integer
         1.5,  # Float
@@ -114,50 +96,31 @@ def find_arg(word, all_args, kw_args):
         lambda x: x * 2,  # Function as argument
         str
     ]
-
-    # Dictionary to map argument names to guessed values
     known_args = deepcopy(kw_args)
-
-    # Arguments for which we don't have values yet
     unknown_args = {x:1 for x in all_args if x not in kw_args.keys()}
-
-    # Indexes for tracking the types for unknown arguments
     type_indexes = [0] * len(unknown_args)
 
-    # Iterate through possible type combinations
     while True:
-        current_values = {}  # Store current values for the unknown arguments
-        for i, arg_name in enumerate(unknown_args):
-            current_values[arg_name] = common_types[type_indexes[i]]
-
-        # Combine known arguments and guessed arguments
+        current_values = {arg_name: common_types[type_indexes[i]] for i, arg_name in enumerate(unknown_args)}
         combined_args = {**current_values, **known_args}
         arg_string = ", ".join([repr(val) for val in current_values.values()] + [f"{key}={repr(val)}" for key, val in known_args.items()])
 
-        # Try to execute the function with the constructed arguments
         try:
-            # Build a code snippet to test the argument combination
             test_code = f"{word}({arg_string})"
 
-            # Execute the code snippet to validate argument types
             exec(test_code)
             return combined_args
         except TypeError as e:
-            # If the combination is invalid, increment the type index and try again
             type_indexes[-1] += 1
             for j in range(len(type_indexes) - 1, -1, -1):
                 if type_indexes[j] >= len(common_types):
                     if j == 0:
-                        # Exhausted all combinations
                         return False
                     type_indexes[j] = 0
                     type_indexes[j - 1] += 1
 
 
 def build_code(word, test=TEST):
-    """
-    Build example code for a given keyword or function name.
-    """
     analysis = analyze_input(word)
     code = ""  # Final code that will be generated
     variables = []  # Store all variable names
