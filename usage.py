@@ -6,8 +6,7 @@ import io
 from contextlib import redirect_stdout
 from copy import deepcopy
 from shutil import get_terminal_size
-from multiprocessing import Process
-from time import time
+import importlib
 
 DEBUG = True
 TIMEOUT_DURATION = 3  # Timeout in seconds
@@ -209,35 +208,7 @@ def find_arg(function_name, args_dicts, code=""):
                     add=True
     return args_dicts
 
-def assign_variables(analysis, code, test):
-    """
-    Assign variables to the required fields based on the analysis result.
-    """
-    variables = []
-    for i, field in enumerate(analysis[2]):
-        field_assignments = {
-            'target': '1',
-            'iter': '[1, 2, 3]',
-            'test': 'LimitedTrue()',
-            'obj': 'Potato()',
-            'value': "1",
-        }
-        var_name = f'var{i}'
-        if field in field_assignments:
-            variables.append(var_name)
-            code += f'{var_name} = {field_assignments[field]}\n'
-        elif field == 'cause':
-            variables.append(var_name)
-            code += f'try:print(1/0)\nexcept Exception as exc:{var_name}=exc\n'
-        elif field == 'items':
-            variables.append(var_name)
-            code += f'import io\nfrom contextlib import redirect_stdout\n{var_name}=io.StringIO()\n'
-        elif field in ['body','orelse','handlers','finalbody','msg','type_comment','args','exc']:
-            # These fields are used to mark the body and else blocks, no variables needed
-            variables.append(None)
-    return code, variables
-
-def generate_keyword_code(word, analysis, code, variables):
+def generate_keyword_code(word, analysis, code='', variables=None):
     """
     Generate the code for Python keywords using the analyzed fields.
     """
@@ -245,100 +216,71 @@ def generate_keyword_code(word, analysis, code, variables):
         'target': 'z ',
         'obj': 'z ',
         'iter': 'in z ',
-        'test': 'z.get() ',
-        'body': ": print('Inside body')\n",
-        'orelse': "else: print('Else condition met')\n",
-        'handlers': "except: print('Except condition met')\n",
-        'finalbody': "finally: print('Final condition met')\n",
-        'msg': ", 'Message'",
+        'test': 'z ',
+        'body': ": BODY\n",
+        'orelse': "else: ELSE\n",
+        'handlers': "except: EXCEPT\n",
+        'finalbody': "finally: FINALLY\n",
+        'msg': ", MESSAGE",
         'value': " z",
         'type_comment': '',
         'args': '',
-        'exc':'RuntimeError("This is an Error Message") ',
+        'exc':'EXCEPTION ',
         'cause': 'from z ',
-        'items': 'redirect_stdout(z)'
+        'items': 'ITEMS'
     }
+    variables = variables or [f'VAR{i}'for i in range(len(analysis[2]))]
     try:
         code += f"{word} "+"".join([field_assignments[field].replace('z',f'{variables[i]}') for i, field in enumerate(analysis[2])])
-        if 'items' in analysis[2]:
-            code += f'print({variables[analysis[2].index('items')]}.getvalue())'
     except KeyError:
         print(f'{word}: {analysis[2]}')
         quit()
-    return code
+    return code, analysis
 
 def handle_function_code(function_name, analysis, code=''):
     """
     Generate code for built-in functions based on inferred or default arguments.
     """
+    usage=[]
     for argument_combination in analysis[2]:
-        value_combination=[{key:argument_combination['Positional-only'][key][i] for key in argument_combination['Positional-only'].keys()} for i in range(len(argument_combination['Positional-only'][list(argument_combination['Positional-only'].keys())[0]]))]
-        for combination in value_combination:
-            variables = []
-            for i, arg in enumerate(combination):
-                variables.append(f'var{i}')
-            new_code = f'print({function_name}({', '.join(combination[arg] for i, arg in enumerate(combination))}))\n'
-            if new_code not in code:
-                code += new_code
-    if 'potato' in code:
-        code = OBJ + code
-    return code
+        usage.append(f'{function_name}({', '.join(arg for i, arg in enumerate(argument_combination['Positional-only']))}))\n')
+    return usage, analysis
 
 def trial_by_error(word, analysis):
     code=""
-    bool_syntax = []
-    other_syntax = []
+    syntax = []
     for a in range(2):
         for b in range(2):
             try:
                 exec(f'{'1 'if a else ''}{word}{' 1'if b else ''}')
-                bool_syntax.append({'before': a, 'after': b})
-                other_syntax.append({'before': a, 'after': b})
+                syntax={'before': a, 'after': b}
             except TypeError:
-                other_syntax.append({'before': a, 'after': b})
+                syntax={'before': a, 'after': b}
             except:
                 pass
-    for entry in bool_syntax:
-        for a in range(2):
-            for b in range(2):
-                string = f'print({str(a)+" " if entry['before'] else ''}{word}{" "+str(b) if entry['after'] else ''})\n'
-                if not string in code:
-                    code += string
-    for entry in other_syntax:
-        args_list = f'{'var1' if entry['before'] or entry['after'] else ''}{', var2' if entry['before'] and entry['after'] else ''}'
-        temp_code = f'def func({args_list}):return {'var1' if entry['before'] else ''} {word} {'var1' if (not entry['before']) and entry['after'] else 'var2' if entry['before'] and entry['after'] else ''}\n\n'
+    if syntax:
+        args_list = f'{'VAR1' if syntax['before'] or syntax['after'] else ''}{', VAR2' if syntax['before'] and syntax['after'] else ''}'
+        temp_code = f'def func({args_list}):return {'VAR1' if syntax['before'] else ''} {word} {'VAR1' if (not syntax['before']) and syntax['after'] else 'VAR2' if syntax['before'] and syntax['after'] else ''}'
         analysis[2] = find_arg('func', [categorize_args(args_list)], code=temp_code)
-        code = handle_function_code('func', analysis, code=temp_code)
-    return code
+        return temp_code, analysis
+    return False, analysis
 
-def build_code(word, test=TEST):
+def build_code(word):
     analysis = analyze_input(word)
-    code = ""
+    usage=False
     if analysis:
         if analysis[1] == 'k':
             if analysis[2]:
-                if 'test' in analysis[2]:
-                    code += test
-                code, variables = assign_variables(analysis, code, test)
-                code = generate_keyword_code(word, analysis, code, variables)
+                usage, analysis = generate_keyword_code(word, analysis)
             else:
-                code = trial_by_error(word, analysis)
+                usage, analysis = trial_by_error(word, analysis)
         elif analysis[1] == 'f':
-            code = handle_function_code(word, analysis)
-    else:
-        code = f'help({word})'
-    return code
+            usage, analysis = handle_function_code(word, analysis)
+    return usage, analysis
 
 def generate_output(word, dict):
-    code=build_code(word)
-    stdout = io.StringIO()
-    with redirect_stdout(stdout):
-        try:
-            exec(code)
-            out = stdout.getvalue()
-        except Exception as e:
-            out = str(e) + "\nCheck Code <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<"
-    dict[word]=f'{'#'*get_terminal_size().columns}\n{word}: {analyze_input(word) if DEBUG else ''}\n----------------------------\n{code}\n----------------------------\n{out}\n{'#'*get_terminal_size().columns}'
+    dict[word]=build_code(word)
+
 
 if __name__ == "__main__":
     keywords = list(keyword.kwlist)
@@ -354,6 +296,6 @@ if __name__ == "__main__":
     while True:
         word = input("Which word do you want to see uses of?").lower()
         if word in words:
-            print(output[word])
+            print(output[word][0])
         else:
             print("Sorry but i don't know that word")
