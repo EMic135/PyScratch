@@ -19,7 +19,6 @@ def return_func(string):
         return string
     return func
 
-
 class Block:
     def __init__(self, content=[""], indent_change=0, color='#33c4ff', master=None):
         if isinstance(content,str):

@@ -1,20 +1,15 @@
 import ast
 import keyword
 import inspect
-import builtins
-import io
 from contextlib import redirect_stdout
 from copy import deepcopy
-from shutil import get_terminal_size
-import importlib
+import sys
+import io
 
-DEBUG = True
+
+DEBUG = False
 TIMEOUT_DURATION = 3  # Timeout in seconds
-EXCLUDE_WORDS = ["open", "aiter", "anext", "breakpoint", "global", "globals",
-                 "locals", "dict", "input", "print", "complex", "local",
-                 "memoryview", "map", 'object', 'property', 'zip', 'import',
-                 'copyright', 'credits', 'exit', 'help', 'license',
-                 'nonlocal', 'quit', '__loader__','Ellipsis', 'execfile']
+EXCLUDE_WORDS = ['__loader__','open','quit','exit', 'gcd', 'Ellipsis', 'breakpoint']
 
 OBJ = """
 class Potato:
@@ -38,6 +33,22 @@ class LimitedTrue:
         else:
             return False
 """
+
+class Exec():
+    def __init__(self):
+        self.stdin = sys.stdin
+        self.stdout= sys.stdout
+
+    def __call__(self, code):
+        sys.stdin, sys.stdout = io.StringIO(), io.StringIO()
+        try:
+            exec(code)
+            sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
+        except SystemExit:
+            None
+        sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
+
+safe_exec=Exec()
 
 def categorize_args(signature):
     pos_only = []
@@ -140,7 +151,7 @@ def generate_args_from_help(function_name):
         help_output = help_output[help_output.index(')', start) + 1:]
     return args_list or None
 
-def analyze_input(identifier):
+def analyze_input(identifier, library=''):
     if keyword.iskeyword(identifier):
         node_class = find_ast_node(identifier)
         if node_class:
@@ -148,26 +159,27 @@ def analyze_input(identifier):
             return [True, "k", required_fields]
         else:
             return [True, "k", []]
-    try:
-        obj = getattr(builtins, identifier)
-        if callable(obj):
-            try:
-                return [True, "f", find_arg(identifier, [categorize_func(obj)])]
-            except (ValueError, TypeError):
+    for module in [sys.modules[key] for i, key in enumerate(sys.modules)]:
+        try:
+            obj = getattr(module, identifier)
+            if callable(obj):
                 try:
-                    return [True, "f", find_arg(identifier, generate_args_from_help(identifier))]
-                except:
-                    return False
-    except AttributeError:
-        pass
+                    return [True, "f", find_arg(identifier, [categorize_func(obj)], library=library)]
+                except (ValueError, TypeError):
+                    try:
+                        return [True, "f", find_arg(identifier, generate_args_from_help(identifier), library=library)]
+                    except:
+                        return False
+        except AttributeError:
+            pass
     try:
-        exec(identifier)
+        safe_exec(identifier.replace(identifier, f'{library + '.' if library else ''}{identifier}'))
         return [True, "k", []]
     except:
         pass
     return False
 
-def find_arg(function_name, args_dicts, code=""):
+def find_arg(function_name, args_dicts, code="", library=''):
     common_types = [
         '10',  # Integer
         '10.5',  # Float
@@ -185,6 +197,8 @@ def find_arg(function_name, args_dicts, code=""):
         'potato'   # class defined above
     ]
     for args_dict in args_dicts:
+        if args_dict['Var-positional'] and not args_dict['Positional-only']:
+            args_dict['Positional-only'].append(args_dict['Var-positional'].replace('*',''))
         args_dict['Positional-only'] = {arg:[] for arg in args_dict['Positional-only']}
         current_indexes = {arg:0 for arg in args_dict['Positional-only']}
         run=True
@@ -192,31 +206,30 @@ def find_arg(function_name, args_dicts, code=""):
             current_values = {key:common_types[current_indexes[key]] for i, key in enumerate(current_indexes)}
             test_code=deepcopy(code)
             arg_string = ", ".join([current_values[key] for i, key in enumerate(current_indexes)])
-            if 'potato' in arg_string:
-                test_code+=OBJ
-            try:
-                test_code += f"{function_name}({arg_string})"
-                test_out = io.StringIO()
-                with redirect_stdout(test_out):
-                    exec(test_code)
-                test_out.getvalue()
-                for key in args_dict['Positional-only'].keys():
-                    args_dict['Positional-only'][key].append(current_values[key])
-            except:
-                pass
-            add=False
-            for key in current_indexes:
-                if key == list(current_indexes.keys())[0]:
-                    current_indexes[key]+=1
-                if add:
-                    current_indexes[key] += 1
-                    add = False
-                if current_indexes[key] >= len(common_types):
-                    if list(current_indexes.keys()).index(key) == len(current_indexes)-1:
-                        run=False
-                        break
-                    current_indexes[key] = 0
-                    add=True
+            if arg_string:
+                if 'potato' in arg_string:
+                    test_code+=OBJ
+                try:
+                    test_code += f"{function_name}({arg_string})"
+                    safe_exec(f'{'import '+library+'\n' if library else ''}'+test_code.replace(function_name,f'{library+'.'if library!='' else ''}{function_name}'))
+                    for key in args_dict['Positional-only'].keys():
+                        args_dict['Positional-only'][key].append(current_values[key])
+                except:pass
+                add=False
+                for key in current_indexes:
+                    if key == list(current_indexes.keys())[0]:
+                        current_indexes[key]+=1
+                    if add:
+                        current_indexes[key] += 1
+                        add = False
+                    if current_indexes[key] >= len(common_types):
+                        if list(current_indexes.keys()).index(key) == len(current_indexes)-1:
+                            run=False
+                            break
+                        current_indexes[key] = 0
+                        add=True
+            else:
+                run = False
     return args_dicts
 
 def generate_keyword_code(word, analysis, code='', variables=None):
@@ -241,7 +254,8 @@ def generate_keyword_code(word, analysis, code='', variables=None):
         'items': 'z ',
         'name': 'z ',
         'bases': '(z)',
-        'returns': '    return z\n'
+        'returns': '    return z\n',
+        'names': 'z '
     }
     skipped_fields = ['type_comment','keywords','decorator','decorator_list', 'type_params']
     fields = deepcopy(analysis[2])
@@ -251,22 +265,50 @@ def generate_keyword_code(word, analysis, code='', variables=None):
     variables = variables or [f'{str(field).upper()}{i}' for i, field in enumerate(fields)]
     try:
         code += f"{word} "+"".join([field_assignments[field].replace('z',f'{variables[i]}') for i, field in enumerate(fields)])
-    except KeyError:
+    except KeyError as e:
         print(f'{word}: {analysis[2]}')
-        quit()
+        raise e
+    variables = [f'{str(field).upper()}{i}{'=None' if field in ['orelse','finalbody'] else ''}' for i, field in enumerate(fields)]
     return code, variables
 
 def handle_function_code(function_name, analysis, code=''):
-    args = [arg for i, arg in enumerate(analysis[2][0]['Positional-only'])]
-    return f'{function_name}({args})', args
+    args_list=[]
+    for argument_combination in analysis[2]:
+        try:
+            if argument_combination['Positional-only']:
+                if isinstance(argument_combination['Positional-only'][list(argument_combination['Positional-only'].keys())[0]], list):
+                    value_combination = [{key: f"{argument_combination['Positional-only'][key][i]}" for key in argument_combination['Positional-only'].keys()} for i in range(len(argument_combination['Positional-only'][list(argument_combination['Positional-only'].keys())[0]]))]
+                else:
+                    value_combination = [{key: f"{argument_combination['Positional-only'][key]}" for key in argument_combination['Positional-only'].keys()}]
+            elif argument_combination['Positional-or-keyword']:
+                if isinstance(argument_combination['Positional-or-keyword'][list(argument_combination['Positional-or-keyword'].keys())[0]], list):
+                    value_combination = [{key: f"{argument_combination['Positional-or-keyword'][key][i]}" for key in argument_combination['Positional-or-keyword'].keys()} for i in range(len(argument_combination['Positional-or-keyword'][list(argument_combination['Positional-or-keyword'].keys())[0]]))]
+                else:
+                    value_combination = [{key: f"{argument_combination['Positional-or-keyword'][key]}" for key in argument_combination['Positional-or-keyword'].keys()}]
+            elif argument_combination['Keyword-only']:
+                if isinstance(argument_combination['Keyword-only'][list(argument_combination['Keyword-only'].keys())[0]], list):
+                    value_combination = [{key: f"{argument_combination['Keyword-only'][key][i]}" for key in argument_combination['Keyword-only'].keys()} for i in range(len(argument_combination['Keyword-only'][list(argument_combination['Keyword-only'].keys())[0]]))]
+                else:
+                    value_combination = [{key: f"{argument_combination['Keyword-only'][key]}" for key in argument_combination['Keyword-only'].keys()}]
+            else:continue
+            if value_combination:
+                args_list.append([arg.upper() for i, arg in enumerate(value_combination[0])])
+            else:args_list.append([])
+        except Exception as e:
+            print(argument_combination)
+            print(value_combination)
+            raise e
+    try: args = args_list[0]
+    except IndexError: args=[]
+    return f'{function_name}({", ".join(args)})', args
 
-def trial_by_error(word, analysis):
+def trial_by_error(word, analysis, library=''):
     code=""
     syntax = []
     for a in range(2):
         for b in range(2):
             try:
-                exec(f'{'1 'if a else ''}{word}{' 1'if b else ''}')
+                safe_exec(f'{'1 'if a else ''}{word}{' 1'if b else ''}'.replace(word, f'{library + '.' if library else ''}{word}'))
                 syntax.append({'before': a, 'after': b})
             except TypeError:
                 syntax.append({'before': a, 'after': b})
@@ -274,23 +316,22 @@ def trial_by_error(word, analysis):
                 pass
     for entry in syntax:
         args_list = f'{'VAR1' if entry['before'] or entry['after'] else ''}{', VAR2' if entry['before'] and entry['after'] else ''}'
-        temp_code = f'def {word[0].upper()}{word[1:]}({args_list}):return {'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''}\n\n'
-        analysis[2] = find_arg('func', [categorize_args(args_list)], code=temp_code)
-        code += handle_function_code('func', analysis, code=temp_code)[0]
+        temp_code = f'def {word[0].upper()}{word[1:]}({args_list}):return ({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})\n\n'
+        analysis[2] = find_arg('func', [categorize_args(args_list)], code=temp_code, library=library)
     if syntax:
-        return f'{'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''}', [arg for i, arg in enumerate(categorize_args(args_list)['Positional-only'])]
+        return f'({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})', [arg for i, arg in enumerate(categorize_args(args_list)['Positional-only'])]
     else:
         return False, False
 
-def build_code(word):
-    analysis = analyze_input(word)
+def build_code(word, library=''):
+    analysis = analyze_input(word, library=library)
     code = ""
     if analysis:
         if analysis[1] == 'k':
             if analysis[2]:
                 code, args = generate_keyword_code(word, analysis)
             else:
-                code, args = trial_by_error(word, analysis)
+                code, args = trial_by_error(word, analysis, library=library)
         elif analysis[1] == 'f':
             code, args = handle_function_code(word, analysis)
         return code, analysis, args
@@ -299,51 +340,89 @@ def build_code(word):
         print(analysis)
     return code, analysis, []
 
-def build_block(word):
-    func_code, analysis, args = build_code(word)
+def build_block(word, library=''):
+    func_code, analysis, args = build_code(word, library=library)
     func_code, args = str(func_code), args or []
     if '' in args:
         del args[args.index('')]
     try:
         start = f'class {word[0].upper()}{word[1:]}:\n'
-        init = f'    def __init__({", ".join(['self']+args)}):\n{"".join([f'        self.{arg.lower()}={arg}\n'for arg in args])}'
+
+        init = f'    def __init__({", ".join(['self']+args).replace('*','')}):'
+        args = [arg.replace('=None','') for arg in args]
+        init+=f'\n{"".join([f'        self.{arg.lower().replace('*','')}={arg.replace('*','')}\n'for arg in args])}'
         lines=func_code.split('\n')
+        name_later = ['else:', 'finally:']
+        temp2=False
         for i in range(len(lines)):
-            for arg in args:lines[i]=lines[i].replace(arg, f'{'{'}self.{arg.lower()}{'}'}')
-        code = f'        self.code=f"""\n{"\n".join(lines)}"""'
-        return start+init+code
+            if temp2:
+                for j in range(len(name_later)):
+                    if name_later[j] == lines[i-2]:
+                        lines[i-2] = f"{'{'}'{lines[i-2]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
+                        lines[i-1] = f"{'{'}f'{lines[i-1]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
+                temp2=False
+            for arg in args:
+                temp=lines[i].replace(arg, f'{'{'}self.{arg.lower().replace('*','')}{'}'}')
+                temp2=lines[i]!=temp
+                lines[i]=temp
+                if temp2:
+                    for j in range(len(name_later)):
+                        if name_later[j] == lines[i - 1]:
+                            break
+        code = f'        self.code=f"""{"\n".join(lines)}"""\n'
+        string = f'    def __str__(self):return self.code\n'
+        return start+init+code+string
     except Exception as e:
         print(f'\n{word}\n{analysis}\n{args or []}\n{func_code}')
         raise e
 
-def generate_output(word, dict):
-    code=build_code(word)[0]
-    stdout = io.StringIO()
-    with redirect_stdout(stdout):
-        try:
-            exec(code)
-            out = stdout.getvalue()
-        except Exception as e:
-            out = str(e) + "\nCheck Code <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<"
-    dict[word]=f'{'#'*get_terminal_size().columns}\n{word}: {analyze_input(word) if DEBUG else ''}\n----------------------------\n{code}\n----------------------------\n{out}\n{'#'*get_terminal_size().columns}'
+def generate_block(word, library=''):
+    return build_block(word, library=library).replace(word, f'{library + '.' if library else ''}{word}')
 
-def generate_block(word, dict):
-    dict[word]=build_block(word)
-
-if __name__ == "__main__":
+def generate_library(libraries = []):
     keywords = list(keyword.kwlist)
 
     # Get all built-in objects, functions, and classes in Python
-    builtins_list = [name for name in dir(builtins)]
-    output = {}
-    for word in builtins_list+keywords:
+    output={}
+    library = {}
+    words = {}
+    for word in keywords:
         if word in EXCLUDE_WORDS:continue
         if DEBUG: print(word)
-        generate_block(word, output)
-    words=list(output.keys())
-    while True:
-        word = input("Which word do you want to see uses of?")
+        output[word] = generate_block(word)
+    for lib in libraries+['builtins']:
         try:
-            print(output[word])
-        except KeyError:
-            print("Sorry but i don't know that word")
+            exec(f'import {lib}\nwords["{lib}"]=[member[0] for member in inspect.getmembers({lib})]')
+            for word in words[lib]:
+                if word in EXCLUDE_WORDS: continue
+                if DEBUG: print(word)
+                output[word] = generate_block(word, library=lib if lib !='builtins' else '')
+                library[word]=lib
+        except ModuleNotFoundError:
+            print(f'Can`t find module {lib}')
+        except Exception as e:
+            raise e
+    return output, library
+
+if __name__=="__main__":
+    import tkinter as tk
+    words, library = generate_library(['math','random'])
+    sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
+    exec(words['and'])
+    exec(words['if'])
+    exec(words['while'])
+    exec(words['print'])
+    exec(words['or'])
+    exec(words['randint'])
+    exec(words['for'])
+    exec(words['range'])
+    analysis=analyze_input('randint','random')
+    sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
+    print(analysis)
+    print(words['if'])
+
+    code=For('A',Range(5).code,If(And(True,Or(1,Randint(1,0).code).code).code,"    "+Print("A+1").code).code,Print("'Bye'").code).code
+
+    code = "\n".join([line for line in code.split('\n') if len(line.strip())>0])
+    print(code)
+    exec(code)

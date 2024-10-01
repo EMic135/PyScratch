@@ -3,6 +3,17 @@ import os
 import random
 import threading
 import time
+import sys
+import io
+
+def safe_exec(string, in_io=io.StringIO(), out_io=io.StringIO()):
+    stdin, stdout = sys.stdin, sys.stdout
+    sys.stdin, sys.stdout = in_io, out_io
+    try:
+        exec(string)
+    except SystemExit:
+        pass
+    sys.stdin, sys.stdout = stdin, stdout
 
 
 class ErrorLoggingFunction:
