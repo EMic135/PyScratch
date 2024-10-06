@@ -6,6 +6,9 @@ from copy import deepcopy
 import sys
 import io
 
+import handlers
+
+NEWLINE="\n" #legacy support for 3.11-
 
 DEBUG = False
 TIMEOUT_DURATION = 3  # Timeout in seconds
@@ -43,7 +46,6 @@ class Exec():
         sys.stdin, sys.stdout = io.StringIO(), io.StringIO()
         try:
             exec(code)
-            sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
         except SystemExit:
             None
         sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
@@ -173,7 +175,7 @@ def analyze_input(identifier, library=''):
         except AttributeError:
             pass
     try:
-        safe_exec(identifier.replace(identifier, f'{library + '.' if library else ''}{identifier}'))
+        safe_exec(identifier.replace(identifier, f"{library + '.' if library else ''}{identifier}"))
         return [True, "k", []]
     except:
         pass
@@ -211,7 +213,7 @@ def find_arg(function_name, args_dicts, code="", library=''):
                     test_code+=OBJ
                 try:
                     test_code += f"{function_name}({arg_string})"
-                    safe_exec(f'{'import '+library+'\n' if library else ''}'+test_code.replace(function_name,f'{library+'.'if library!='' else ''}{function_name}'))
+                    safe_exec(f"{'import '+library+NEWLINE if library else ''}"+test_code.replace(function_name,f"{library+'.'if library!='' else ''}{function_name}"))
                     for key in args_dict['Positional-only'].keys():
                         args_dict['Positional-only'][key].append(current_values[key])
                 except:pass
@@ -268,7 +270,7 @@ def generate_keyword_code(word, analysis, code='', variables=None):
     except KeyError as e:
         print(f'{word}: {analysis[2]}')
         raise e
-    variables = [f'{str(field).upper()}{i}{'=None' if field in ['orelse','finalbody'] else ''}' for i, field in enumerate(fields)]
+    variables = [f"{str(field).upper()}{i}{'=None' if field in ['orelse','finalbody'] else ''}" for i, field in enumerate(fields)]
     return code, variables
 
 def handle_function_code(function_name, analysis, code=''):
@@ -298,9 +300,10 @@ def handle_function_code(function_name, analysis, code=''):
             print(argument_combination)
             print(value_combination)
             raise e
-    try: args = args_list[0]
-    except IndexError: args=[]
-    return f'{function_name}({", ".join(args)})', args
+    try:
+        return [[f'{function_name}({", ".join(args)})', args]for args in args_list]
+    except (IndexError, ValueError):
+        return [[f'{function_name}()', []]]
 
 def trial_by_error(word, analysis, library=''):
     code=""
@@ -308,18 +311,18 @@ def trial_by_error(word, analysis, library=''):
     for a in range(2):
         for b in range(2):
             try:
-                safe_exec(f'{'1 'if a else ''}{word}{' 1'if b else ''}'.replace(word, f'{library + '.' if library else ''}{word}'))
+                safe_exec(f"{'1 'if a else ''}{word}{' 1'if b else ''}".replace(word, f"{library + '.' if library else ''}{word}"))
                 syntax.append({'before': a, 'after': b})
             except TypeError:
                 syntax.append({'before': a, 'after': b})
             except:
                 pass
     for entry in syntax:
-        args_list = f'{'VAR1' if entry['before'] or entry['after'] else ''}{', VAR2' if entry['before'] and entry['after'] else ''}'
-        temp_code = f'def {word[0].upper()}{word[1:]}({args_list}):return ({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})\n\n'
+        args_list = f"{'VAR1' if entry['before'] or entry['after'] else ''}{', VAR2' if entry['before'] and entry['after'] else ''}"
+        temp_code = f"def {word[0].upper()}{word[1:]}({args_list}):return ({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})\n\n"
         analysis[2] = find_arg('func', [categorize_args(args_list)], code=temp_code, library=library)
     if syntax:
-        return f'({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})', [arg for i, arg in enumerate(categorize_args(args_list)['Positional-only'])]
+        return f"({'VAR1' if entry['before'] else ''} {word} {'VAR1' if (not entry['before']) and entry['after'] else 'VAR2' if entry['before'] and entry['after'] else ''})", [arg for i, arg in enumerate(categorize_args(args_list)['Positional-only'])]
     else:
         return False, False
 
@@ -330,54 +333,63 @@ def build_code(word, library=''):
         if analysis[1] == 'k':
             if analysis[2]:
                 code, args = generate_keyword_code(word, analysis)
+                code, args = [code], [args]
             else:
                 code, args = trial_by_error(word, analysis, library=library)
+                code, args = [code], [args]
         elif analysis[1] == 'f':
-            code, args = handle_function_code(word, analysis)
+            temp = handle_function_code(word, analysis)
+            code, args = [temp_code[0] for temp_code in temp], [temp_args[1] for temp_args in temp]
         return code, analysis, args
     else:
-        print(word)
-        print(analysis)
+        if DEBUG:
+            print(word)
+            print(analysis)
     return code, analysis, []
 
 def build_block(word, library=''):
-    func_code, analysis, args = build_code(word, library=library)
-    func_code, args = str(func_code), args or []
-    if '' in args:
-        del args[args.index('')]
-    try:
-        start = f'class {word[0].upper()}{word[1:]}:\n'
+    code, analysis, arguments = build_code(word, library=library)
+    output=[]
+    for i in range(len(code)):
+        func_code = str(code[i])
+        args = arguments[i] or []
+        if '' in args and isinstance(args,list):
+            del args[args.index('')]
+        try:
+            start = f'class {word[0].upper()}{word[1:]}:\n'
 
-        init = f'    def __init__({", ".join(['self']+args).replace('*','')}):'
-        args = [arg.replace('=None','') for arg in args]
-        init+=f'\n{"".join([f'        self.{arg.lower().replace('*','')}={arg.replace('*','')}\n'for arg in args])}'
-        lines=func_code.split('\n')
-        name_later = ['else:', 'finally:']
-        temp2=False
-        for i in range(len(lines)):
-            if temp2:
-                for j in range(len(name_later)):
-                    if name_later[j] == lines[i-2]:
-                        lines[i-2] = f"{'{'}'{lines[i-2]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
-                        lines[i-1] = f"{'{'}f'{lines[i-1]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
-                temp2=False
-            for arg in args:
-                temp=lines[i].replace(arg, f'{'{'}self.{arg.lower().replace('*','')}{'}'}')
-                temp2=lines[i]!=temp
-                lines[i]=temp
+            init = f"    def __init__({', '.join(['self']+args)}):"
+            args = [arg.replace('=None','') for arg in args]
+            init_lines = [f"        self.{arg.lower().replace('*','')}={arg.replace('*','')}"for arg in args]
+            init+=f"\n{NEWLINE.join(init_lines)}\n"
+            lines=func_code.split('\n')
+            name_later = ['else:', 'finally:']
+            temp2=False
+            for i in range(len(lines)):
                 if temp2:
                     for j in range(len(name_later)):
-                        if name_later[j] == lines[i - 1]:
-                            break
-        code = f'        self.code=f"""{"\n".join(lines)}"""\n'
-        string = f'    def __str__(self):return self.code\n'
-        return start+init+code+string
-    except Exception as e:
-        print(f'\n{word}\n{analysis}\n{args or []}\n{func_code}')
-        raise e
+                        if name_later[j] == lines[i-2]:
+                            lines[i-2] = f"{'{'}'{lines[i-2]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
+                            lines[i-1] = f"{'{'}f'{lines[i-1]}' if self.{arg.lower().replace('*', '')} else ''{'}'}"
+                    temp2=False
+                for arg in args:
+                    temp=lines[i].replace(arg, f"{'{'}self.{arg.lower().replace('*','')}{'}'}")
+                    temp2=lines[i]!=temp
+                    lines[i]=temp
+                    if temp2:
+                        for j in range(len(name_later)):
+                            if name_later[j] == lines[i - 1]:
+                                break
+            code_arg = f'        self.code=f"""{NEWLINE.join(lines)}"""\n'
+            string = f'    def __str__(self):return self.code\n'
+            output.append(start+init+code_arg+string)
+        except Exception as e:
+            print(f'\n{word}\n{analysis}\n{args or []}\n{func_code}')
+            raise e
+    return output
 
 def generate_block(word, library=''):
-    return build_block(word, library=library).replace(word, f'{library + '.' if library else ''}{word}')
+    return [code.replace(word, f"{library + '.' if library else ''}{word}")for code in build_block(word, library=library)]
 
 def generate_library(libraries = []):
     keywords = list(keyword.kwlist)
@@ -408,21 +420,17 @@ if __name__=="__main__":
     import tkinter as tk
     words, library = generate_library(['math','random'])
     sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
-    exec(words['and'])
-    exec(words['if'])
-    exec(words['while'])
-    exec(words['print'])
-    exec(words['or'])
-    exec(words['randint'])
-    exec(words['for'])
-    exec(words['range'])
-    analysis=analyze_input('randint','random')
-    sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
-    print(analysis)
-    print(words['if'])
+    exec(words['and'][0])
+    exec(words['if'][0])
+    exec(words['while'][0])
+    exec(words['print'][0])
+    exec(words['or'][0])
+    exec(words['randint'][0])
+    exec(words['for'][0])
+    exec(words['range'][1])
 
     code=For('A',Range(5).code,If(And(True,Or(1,Randint(1,0).code).code).code,"    "+Print("A+1").code).code,Print("'Bye'").code).code
-
     code = "\n".join([line for line in code.split('\n') if len(line.strip())>0])
+
     print(code)
     exec(code)

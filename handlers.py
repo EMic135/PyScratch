@@ -44,7 +44,7 @@ class ErrorLoggingFunction:
         """
         error_message = ""
         try:
-            self.function(*args)
+            return self.function(*args)
         except (Exception, BaseException) as e:
             if isinstance(e, (tuple, list)):
                 for item in e:
@@ -110,13 +110,12 @@ class DataLoggingFunction:
             with open(log_file, "w"):
                 pass
 
-    @ErrorLoggingFunction
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
         """
         Call the decorated function and log any data.
         """
-        result = self.function(*args)
-        data = f"[{datetime.datetime.now()}] [{__file__}] {self.function.__name__} : {str(result)}"
+        result = self.function(*args, **kwargs)
+        data = f"[{datetime.datetime.now()}] [{__file__}] {self.function.__name__} : {str(result)}\n"
         with open(self.log_file, "a") as f:
             try:
                 f.write(data)
@@ -138,6 +137,9 @@ class DataLoggingFunction:
         return result
 
 def test():
+    @DataLoggingFunction
+    def works():
+        return "hi"
     @ErrorLoggingFunction
     def divide_by_zero():
         x = 1 / 0
@@ -187,6 +189,7 @@ def test():
     def infinite_recursion():
         return infinite_recursion()
 
+    works()
     divide_by_zero()
     read_file()
     add_numbers()
