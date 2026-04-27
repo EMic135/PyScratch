@@ -151,9 +151,10 @@ class Container:
         self.frame.pack(*args, **kwargs)
 
 def create_block(name, obj, args, init):
-    return 'from block_lib import *\nclass '+ name + '(' + obj + '):\n    def __init__(self, ' + args + '):\n        ' + init
+    return 'from block_lib import *\nclass '+ name + '(' + obj + '):\n    def __init__(self, ' + args + '):\n        ' + "\n        ".join(init.split('\n'))
 
 def write_block(name, obj, args, init):
+    print(os.getcwd() + "/Blocks/" + name + ".block")
     f = open(os.getcwd() + "/Blocks/" + name + ".block", 'w')
     f.write(create_block(name, obj, args, init))
     f.close()

@@ -58,7 +58,7 @@ if __name__=='__main__':
 
     def handle_create():
         data=get_data()
-        block_lib.create_block(data[0],data[1],data[2],data[3])
+        block_lib.write_block(data[0],data[1],data[2],data[3])
 
     def update_preview(event=None):
         data = get_data()
