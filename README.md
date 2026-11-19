@@ -1,2 +1,2 @@
 # PyScratch
-Making a simple-to-use python IDE with sratch-like blocks
+Making a simple-to-use python IDE with scratch-like blocks
